@@ -15,7 +15,7 @@ jobs:
       - name: Checkout this component repo
         uses: actions/checkout@v4
         with:
-          repository: fatimaworktest/ci-aqua-component   # important: self checkout
+          repository: fatimaworktest/ci-aqua-scan   # important: self checkout
           fetch-depth: 0
 
       - name: Debug git info
