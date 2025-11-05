@@ -1,0 +1,57 @@
+name: Reusable Aqua Scan
+on:
+  workflow_call:
+    inputs:
+      scan_path:
+        description: "Path to scan (relative to workspace)"
+        required: false
+        type: string
+        default: "."
+      override_repository:
+        description: "Explicit repo name to try to force"
+        required: false
+        type: string
+        default: ""
+      override_repository_url:
+        description: "Explicit repo URL to try to force"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      AQUA_KEY:
+        required: true
+      AQUA_SECRET:
+        required: true
+
+jobs:
+  trivy-aqua:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Remove .git to mimic detached context
+        run: rm -rf .git
+
+      - name: Install Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          trivy_version: latest
+
+      - name: Run Trivy Aqua plugin (fs scan)
+        env:
+          AQUA_KEY: ${{ secrets.AQUA_KEY }}
+          AQUA_SECRET: ${{ secrets.AQUA_SECRET }}
+          TRIVY_RUN_AS_PLUGIN: aqua
+          OVERRIDE_REPOSITORY: ${{ inputs.override_repository }}
+          OVERRIDE_REPOSITORY_URL: ${{ inputs.override_repository_url }}
+          OVERRIDE_REPOSITORY_SOURCE: github
+          OVERRIDE_BRANCH: ${{ github.ref_name }}
+          OVERRIDE_BUILDSYSTEM: github_actions
+        run: |
+          echo "Scanning path: ${{ inputs.scan_path }}"
+          trivy --debug ${{ inputs.scan_path }}
