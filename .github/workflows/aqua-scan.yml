@@ -1,22 +1,11 @@
-name: Reusable Aqua Scan
+name: Shared Aqua Scan
 on:
   workflow_call:
     inputs:
       scan_path:
-        description: "Path to scan (relative to workspace)"
         required: false
         type: string
         default: "."
-      override_repository:
-        description: "Explicit repo name to try to force"
-        required: false
-        type: string
-        default: ""
-      override_repository_url:
-        description: "Explicit repo URL to try to force"
-        required: false
-        type: string
-        default: ""
     secrets:
       AQUA_KEY:
         required: true
@@ -24,34 +13,56 @@ on:
         required: true
 
 jobs:
-  trivy-aqua:
+  aqua:
+    name: Aqua scanner (shared component)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - name: Checkout caller repo
+      # ❌ INTENTIONAL “BUGGY” PATTERN:
+      # We DO NOT checkout the caller's repo at all.
+      # (Or, alternatively, we checkout *this* shared repo instead of the caller.)
+      - name: Checkout THIS shared component repo (not the caller)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          repository: ${{ github.repository }}
+          # ^ this points to ci-aqua-scan itself when this file runs
 
-      - name: Remove .git to mimic detached context
-        run: rm -rf .git
+      - name: Show workspace and git status (for debugging)
+        run: |
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          git rev-parse --is-inside-work-tree || true
+          git remote -v || true
+          ls -la
 
-      - name: Install Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Run Aqua scanner (docker)
+        uses: docker://aquasec/aqua-scanner
         with:
-          trivy_version: latest
-
-      - name: Run Trivy Aqua plugin (fs scan)
+          # We still pass '.' so the scan runs, but it's scanning the shared repo’s workspace,
+          # which is NOT the caller repo; Git metadata of the caller is absent here.
+          args: trivy fs --scanners misconfig,vuln,secret .
         env:
           AQUA_KEY: ${{ secrets.AQUA_KEY }}
           AQUA_SECRET: ${{ secrets.AQUA_SECRET }}
-          TRIVY_RUN_AS_PLUGIN: aqua
-          OVERRIDE_REPOSITORY: ${{ inputs.override_repository }}
-          OVERRIDE_REPOSITORY_URL: ${{ inputs.override_repository_url }}
-          OVERRIDE_REPOSITORY_SOURCE: github
-          OVERRIDE_BRANCH: ${{ github.ref_name }}
-          OVERRIDE_BUILDSYSTEM: github_actions
+          GITHUB_TOKEN: ${{ github.token }}
+          AQUA_URL: https://api.dev.supply-chain.cloud.aquasec.com
+          CSPM_URL: https://stage.api.cloudsploit.com
+          TRIVY_RUN_AS_PLUGIN: 'aqua'
+
+          # ⬇️ Attempted overrides (expected to have ❌ no effect, matching your ticket):
+          OVERRIDE_REPOSITORY_NAME: ${{ github.repository }}
+          OVERRIDE_REPOSITORY: ${{ github.repository }}
+
+      - name: Run Aqua scanner (containerized, with debug)
+        # optional extra run to capture more logs
         run: |
-          echo "Scanning path: ${{ inputs.scan_path }}"
-          trivy --debug ${{ inputs.scan_path }}
+          docker run --rm \
+            -e AQUA_KEY="${{ secrets.AQUA_KEY }}" \
+            -e AQUA_SECRET="${{ secrets.AQUA_SECRET }}" \
+            -e GITHUB_TOKEN="${{ github.token }}" \
+            -e AQUA_URL="https://api.dev.supply-chain.cloud.aquasec.com" \
+            -e CSPM_URL="https://stage.api.cloudsploit.com" \
+            -e TRIVY_RUN_AS_PLUGIN="aqua" \
+            -e OVERRIDE_REPOSITORY_NAME="${{ github.repository }}" \
+            -e OVERRIDE_REPOSITORY="${{ github.repository }}" \
+            -v "$PWD":/workspace \
+            -w /workspace \
+            aquasec/aqua-scanner trivy --debug fs --scanners misconfig,vuln,secret .
